@@ -1,0 +1,36 @@
+# -----------
+# Python
+# -----------
+
+# Carpetas de caché de Python
+__pycache__/
+*.pyc
+
+# Entornos virtuales (ignora la carpeta si la creas)
+.venv/
+venv/
+env/
+
+# -----------
+# Específico del Editor
+# -----------
+
+# Ignorar la configuración local de VS Code
+.vscode/
+
+# -----------
+# Específico del Sistema Operativo
+# -----------
+
+# Ignorar archivos del sistema de Mac
+.DS_Store
+
+# Ignorar archivos del sistema de Windows
+Thumbs.db
+
+# -----------
+# Específico de TU Proyecto (RetroNeon Sim)
+# -----------
+
+# Ignorar la carpeta de resultados/logs que genera el script
+results/
