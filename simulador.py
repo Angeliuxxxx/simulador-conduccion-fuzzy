@@ -30,7 +30,6 @@ ASSETS_DIR = "assets"  # carpeta opcional para sprites
 
 # -------------------- Fuzzy controller (Mamdani) --------------------
 class FuzzyController:
-    
     def __init__(self):
         # Universos
         self.vel_univ = np.arange(0, 121, 1)     # km/h
@@ -61,27 +60,21 @@ class FuzzyController:
         self.act['mantener'] = fuzz.trimf(self.act_univ, [30, 50, 70])
         self.act['acelerar'] = fuzz.trimf(self.act_univ, [60, 100, 100])
 
-        # --- MEJORA DE REGLAS DE IA ---
-        # Reglas más limpias y completas
+        # Reglas
         rules = [
-            # Regla de seguridad principal: Poca visibilidad = FRENAR
-            ctrl.Rule(self.vis['baja'], self.act['frenar']),
-
-            # Reglas para distancia CORTA
-            ctrl.Rule(self.dist['corta'] & (self.vel['media'] | self.vel['alta']), self.act['frenar']),
+            ctrl.Rule(self.dist['corta'] & self.vel['alta'], self.act['frenar']),
+            ctrl.Rule(self.dist['corta'] & self.vel['media'], self.act['frenar']),
             ctrl.Rule(self.dist['corta'] & self.vel['baja'], self.act['mantener']),
-
-            # Reglas para distancia MEDIA
             ctrl.Rule(self.dist['media'] & self.vel['alta'], self.act['frenar']),
             ctrl.Rule(self.dist['media'] & self.vel['media'], self.act['mantener']),
-            ctrl.Rule(self.dist['media'] & self.vel['baja'], self.act['mantener']), # Cauteloso
-
-            # Reglas para distancia LARGA
-            ctrl.Rule(self.dist['larga'] & self.vis['alta'] & (self.vel['baja'] | self.vel['media']), self.act['acelerar']),
-            ctrl.Rule(self.dist['larga'] & self.vis['alta'] & self.vel['alta'], self.act['mantener']), # NUEVA REGLA "CRUCERO"
-            ctrl.Rule(self.dist['larga'] & self.vis['media'], self.act['mantener']), # Cauteloso si visibilidad no es perfecta
+            ctrl.Rule(self.dist['media'] & self.vel['baja'], self.act['mantener']),
+            ctrl.Rule(self.dist['larga'] & self.vis['alta'] & self.vel['baja'], self.act['acelerar']),
+            ctrl.Rule(self.dist['larga'] & self.vis['alta'] & self.vel['media'], self.act['acelerar']),
+            ctrl.Rule(self.dist['larga'] & self.vis['media'], self.act['mantener']),
+            ctrl.Rule(self.vis['baja'], self.act['frenar']),
+            ctrl.Rule(self.vel['baja'] & self.dist['corta'], self.act['mantener']),
+            ctrl.Rule(self.vel['alta'] & self.vis['media'] & self.dist['media'], self.act['frenar']),
         ]
-        # --- FIN DE MEJORA DE REGLAS ---
 
         system = ctrl.ControlSystem(rules)
         self.sim = ctrl.ControlSystemSimulation(system)
@@ -465,31 +458,13 @@ class RetroNeonSim:
         if self.car_sprite:
             s.blit(self.car_sprite, (self.car_x, self.car_y))
         else:
-            # --- MEJORA VISUAL DEL COCHE ---
-            # Dibuja un coche más estilizado si no hay sprite
-            cx, cy, cw, ch = self.car_x, self.car_y, self.car_w, self.car_h
-            
-            # Carrocería principal (polígono)
-            car_color = (40, 110, 220)
-            car_body = [
-                (cx + 5, cy + ch), (cx + 5, cy + ch - 25), (cx + 15, cy + 15),
-                (cx + cw - 25, cy + 5), (cx + cw - 5, cy + ch - 25), (cx + cw - 5, cy + ch)
-            ]
-            pygame.draw.polygon(s, car_color, car_body)
-            
-            # Parabrisas (polígono)
-            windshield_color = (150, 200, 255)
-            windshield = [
-                (cx + 20, cy + 18), (cx + 30, cy + 35),
-                (cx + cw - 40, cy + 28), (cx + cw - 30, cy + 10)
-            ]
-            pygame.draw.polygon(s, windshield_color, windshield)
-
-            # Ruedas (círculos)
-            wheel_color = (20, 20, 20)
-            pygame.draw.circle(s, wheel_color, (cx + 25, cy + ch - 10), 12)
-            pygame.draw.circle(s, wheel_color, (cx + cw - 30, cy + ch - 10), 12)
-            # --- FIN DE MEJORA VISUAL ---
+            # car body
+            pygame.gfxdraw.filled_rounded_rect = None
+            pygame.draw.rect(s, (40,110,220), (self.car_x, self.car_y, self.car_w, self.car_h), border_radius=12)
+            pygame.draw.rect(s, (18,18,18), (self.car_x+8, self.car_y+8, self.car_w-16, self.car_h-20), border_radius=8)
+            # wheels
+            pygame.draw.ellipse(s, (20,20,20), (self.car_x+10, self.car_y+self.car_h-12, 28,14))
+            pygame.draw.ellipse(s, (20,20,20), (self.car_x+self.car_w-38, self.car_y+self.car_h-12, 28,14))
 
         # brake lights
         if self.brake_on:
@@ -519,23 +494,20 @@ class RetroNeonSim:
         # Draw labels and neon texts
         # top-right status
         self.draw_neon_text(s, "AutoMax", (450, 18), size=32, glow_color=(170,60,220))
-        
-        # --- ARREGLO DE VENTANA CORTADA ---
-        # info block (right) - Movido 'info_x' de 820 a 780
-        info_x = 780 
+        # info block (right)
+        info_x = 820
         info_y = 60
         # Real values
-        dsurf = self.font.render(f"Velocidad (real): {self.display_speed:.1f} km/h", True, (220,220,220))
+        dsurf = self.font.render(f"Velocidad (slider): {self.speed:.1f} km/h (press S to save, SPACE demo, R reset)", True, (220,220,220))
         s.blit(dsurf, (info_x, info_y))
         d2 = self.font.render(f"Distancia: {self.obst_distance_m:.1f} m   Visibilidad: {self.visibility:.0f}%", True, (220,220,220))
         s.blit(d2, (info_x, info_y + 28))
-        
         # last action from log
         if self.log:
             last = self.log[-1]
             act = last["action_text"]
             action_val = last["action_val"]
-            txt = f"Última acción: {act}  ({action_val:.1f})"
+            txt = f"Última acción: {act}  ({action_val})"
             actsurf = self.bigfont.render(txt, True, (255,200,120))
             s.blit(actsurf, (info_x, info_y + 70))
 
@@ -545,8 +517,7 @@ class RetroNeonSim:
 
         # draw a legend for controls
         legend = self.font.render("Teclas: SPACE Demo | S guardar CSV | R reset | ESC salir", True, (180,180,180))
-        s.blit(legend, (info_x, info_y + 120)) # Movido al bloque de info
-        # --- FIN DE ARREGLO DE VENTANA ---
+        s.blit(legend, (20, SCREEN_H - 30))
 
         pygame.display.flip()
 
