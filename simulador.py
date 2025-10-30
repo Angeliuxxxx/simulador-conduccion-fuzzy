@@ -2,6 +2,10 @@
 Simulador RetroNeon AI Driving (Mamdani fuzzy)
 Guarda como retro_neon_fuzzy_sim.py
 Requisitos: pygame, numpy, scikit-fuzzy, pandas (opcional)
+
+
+
+Prueba control de versiones
 """
 
 import os
