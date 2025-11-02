@@ -1,3 +1,10 @@
+
+"""
+Simulador RetroNeon AI Driving (Mamdani fuzzy)
+Guarda como retro_neon_fuzzy_sim.py
+Requisitos: pygame, numpy, scikit-fuzzy, pandas (opcional)
+"""
+
 import os
 import sys
 import math
@@ -156,11 +163,16 @@ class RetroNeonSim:
         self.speed = 40.0        # km/h (actual)
         self.target_speed = 40.0 # slider initial
         self.px_per_m = 5.0      # visual scale: pixels per meter
-        # car visual (we keep original but can vary in draw)
-        self.car_x = SCREEN_W // 2 - 64
-        self.car_y = SCREEN_H - 180
-        self.car_w = 128
-        self.car_h = 64
+        
+        # *** CAMBIO: Dimensiones del coche unificadas ***
+        # car visual (dimensiones de la vista trasera)
+        self.car_vis_w = 84
+        self.car_vis_h = 140
+        self.car_x = SCREEN_W // 2 - self.car_vis_w // 2
+        self.car_y = SCREEN_H - self.car_vis_h - 18
+        self.car_w = self.car_vis_w # Usamos el ancho visual
+        self.car_h = self.car_vis_h # Usamos el alto visual
+        
         self.obst_distance_m = 40.0  # meters (slider)
         self.visibility = 100.0       # %
         self.obst_base_x = self.car_x + 400  # base position for obstacle drawing
@@ -200,6 +212,7 @@ class RetroNeonSim:
             car_path = os.path.join(ASSETS_DIR, "car.png")
             if os.path.exists(car_path):
                 self.car_sprite = pygame.image.load(car_path).convert_alpha()
+                # *** CAMBIO: Usar dimensiones de vista trasera si se carga car.png ***
                 self.car_sprite = pygame.transform.smoothscale(self.car_sprite, (self.car_w, self.car_h))
         except Exception as e:
             print("Car sprite load error:", e)
@@ -293,9 +306,10 @@ class RetroNeonSim:
         self.log = []
         self.time = 0.0
 
+    # *** CAMBIO: Función 'update' simplificada (lógica arreglada) ***
     def update(self, dt):
         # if user moves sliders, read them (manual input)
-        self.speed = self.slider_speed.value  # interpret slider as current speed reading if user sets it
+        self.speed = self.slider_speed.value
         self.obst_distance_m = self.slider_dist.value
         self.visibility = self.slider_vis.value
 
@@ -309,6 +323,7 @@ class RetroNeonSim:
                 self.slider_speed.value = random.uniform(20, 100)
                 self.slider_dist.value = random.uniform(5, 90)
                 self.slider_vis.value = random.uniform(20, 100)
+                
                 # assign to current state (simulate sensor)
                 self.speed = self.slider_speed.value
                 self.obst_distance_m = self.slider_dist.value
@@ -321,6 +336,7 @@ class RetroNeonSim:
         if action_val < 35:
             accel = -60.0     # strong brake (km/h per s approx)
             self.brake_on = True
+            # *** LLAMADA A PARTICULAS (AHORA USA self.car_w) ***
             self.add_particles(intensity=1.2, direction=-1)
             action_text = "FRENAR"
         elif action_val > 65:
@@ -346,13 +362,10 @@ class RetroNeonSim:
         px_move = vel_m_s * self.px_per_m * dt
         self.road_offset = (self.road_offset + px_move) % 60
         
-        if not getattr(self, "dragging_obstacle", False):
-                # approach distance by meters traveled * factor (factor controls how fast it looks relative to speed)
-            approach_factor = 1.0  # tweak 0.5..2.0 to slow down / speed up approach feeling
-            self.obst_distance_m = max(0.0, min(100.0, self.obst_distance_m - vel_m_s * dt * approach_factor))
-                # if you're using the slider as the authoritative input when user touches it,
-                # keep slider synced to the automatic motion
-            self.slider_dist.value = self.obst_distance_m
+        # --- LÍNEAS DE FÍSICA EN CONFLICTO (BORRADAS) ---
+        # El obstáculo ya no se mueve por su cuenta.
+        # El slider de distancia es la única fuente de verdad.
+        
         # update particles physics
         self.update_particles(dt)
 
@@ -367,15 +380,29 @@ class RetroNeonSim:
             "action_text": action_text
         })
 
+    # *** CAMBIO: Función 'add_particles' (posición arreglada) ***
     def add_particles(self, intensity=1.0, direction=1):
-        # add a few particles near rear (direction -1 for braking/backwards)
-        for i in range(int(1 + intensity*2)):
-            x = self.car_x + (self.car_w/2) + random.uniform(-10,10)
-            y = self.car_y + self.car_h + random.uniform(0,8)
+        # Genera partículas en las posiciones de las llantas traseras
+        
+        # Posiciones X aproximadas de las llantas (basadas en las luces de freno)
+        llanta_izq_x = self.car_x + 10 + random.uniform(-2, 2)
+        llanta_der_x = self.car_x + self.car_w - 24 + random.uniform(-2, 2)
+        
+        # Posición Y (justo en la parte inferior del coche)
+        y = self.car_y + self.car_h + random.uniform(0, 8)
+
+        # Genera la mitad de partículas en cada llanta
+        for i in range(int(1 + intensity)): # Mitad en la izquierda
             life = random.uniform(0.4, 1.0)
             vx = random.uniform(10,60) * (0.02 * (-direction))
             vy = random.uniform(-10,5) * 0.02
-            self.particles.append([x,y,life,vx,vy])
+            self.particles.append([llanta_izq_x, y, life, vx, vy])
+            
+        for i in range(int(1 + intensity)): # Mitad en la derecha
+            life = random.uniform(0.4, 1.0)
+            vx = random.uniform(10,60) * (0.02 * (-direction))
+            vy = random.uniform(-10,5) * 0.02
+            self.particles.append([llanta_der_x, y, life, vx, vy])
 
     def update_particles(self, dt):
         newp = []
@@ -464,8 +491,7 @@ class RetroNeonSim:
         pygame.draw.line(s, lane_color, (center_x + road_left_w, road_bottom_y), (center_x + road_horizon_inner, road_horizon_y), 3)
 
        
-               # ---------- Líneas centrales verticales (autopista con movimiento suave) ----------
-                # ---------- Líneas centrales verticales (autopista con movimiento suave y delgado) ----------
+        # ---------- Líneas centrales verticales (autopista con movimiento suave y delgado) ----------
         dash_h = 40       # altura base de cada línea (antes 60)
         gap = 90           # espacio entre líneas (más grande para respiro visual)
         color_line = (255, 255, 200)  # color cálido tipo autopista nocturna
@@ -531,13 +557,10 @@ class RetroNeonSim:
             pygame.gfxdraw.rectangle(s, rect, (255,120,120))
 
         # ---------- Car (rear view) ----------
+        # *** CAMBIO: Usar variables de 'self' para dibujar el coche ***
         # place car centered near bottom
-        car_vis_w = 84
-        car_vis_h = 140
-        cx = self.car_x = center_x - car_vis_w // 2
-        cy = self.car_y = SCREEN_H - car_vis_h - 18
-        cw = car_vis_w
-        ch = car_vis_h
+        # Usa las variables de 'self' que ya definimos en __init__
+        cx, cy, cw, ch = self.car_x, self.car_y, self.car_w, self.car_h
 
         if self.car_sprite:
             car_img = pygame.transform.smoothscale(self.car_sprite, (cw, ch))
@@ -593,7 +616,7 @@ class RetroNeonSim:
         # ---------- Side indicator bars (visibility / distance) ----------
         # --- BARRAS DE VISIBILIDAD Y DISTANCIA (abajo a la derecha) ---
 
-# Tamaños y margen
+        # Tamaños y margen
         vis_bar_h = 120
         dist_bar_h = 120
         bar_w = 16
