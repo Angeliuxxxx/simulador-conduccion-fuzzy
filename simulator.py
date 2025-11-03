@@ -1,6 +1,6 @@
 
 """
-Simulador RetroNeon AI Driving (Mamdani fuzzy)
+Simulador AUTOMAX (Mamdani fuzzy)
 Guarda como retro_neon_fuzzy_sim.py
 Requisitos: pygame, numpy, scikit-fuzzy, pandas (opcional)
 """
@@ -154,7 +154,7 @@ class RetroNeonSim:
         self.car_sprite = None
         self.obst_sprite = None
         self.bg_sprite = None
-        self.try_load_assets()
+        
 
         # fuzzy controller
         self.fuzzy = FuzzyController()
@@ -166,13 +166,16 @@ class RetroNeonSim:
         
         # *** CAMBIO: Dimensiones del coche unificadas ***
         # car visual (dimensiones de la vista trasera)
-        self.car_vis_w = 84
+        self.car_vis_w = 180
         self.car_vis_h = 140
         self.car_x = SCREEN_W // 2 - self.car_vis_w // 2
         self.car_y = SCREEN_H - self.car_vis_h - 18
         self.car_w = self.car_vis_w # Usamos el ancho visual
         self.car_h = self.car_vis_h # Usamos el alto visual
         
+
+        self.try_load_assets()
+
         self.obst_distance_m = 40.0  # meters (slider)
         self.visibility = 100.0       # %
         self.obst_base_x = self.car_x + 400  # base position for obstacle drawing
@@ -385,11 +388,11 @@ class RetroNeonSim:
         # Genera partículas en las posiciones de las llantas traseras
         
         # Posiciones X aproximadas de las llantas (basadas en las luces de freno)
-        llanta_izq_x = self.car_x + 10 + random.uniform(-2, 2)
-        llanta_der_x = self.car_x + self.car_w - 24 + random.uniform(-2, 2)
+        llanta_izq_x = self.car_x + 30 + random.uniform(-2, 2)
+        llanta_der_x = self.car_x + self.car_w - 50 + random.uniform(-2, 2)
         
         # Posición Y (justo en la parte inferior del coche)
-        y = self.car_y + self.car_h + random.uniform(0, 8)
+        y = self.car_y + self.car_h - 25 + random.uniform(0, 8)
 
         # Genera la mitad de partículas en cada llanta
         for i in range(int(1 + intensity)): # Mitad en la izquierda
@@ -437,10 +440,13 @@ class RetroNeonSim:
         y = int(road_horizon_y + (1.0 - t) * max_travel)
 
         # size scales inversely with distance (close -> bigger)
-        size = int(max(18, 18 + (1.0 - t) * 80))
+# size scales inversely with distance (close -> bigger)
+        width = int(max(24, 24 + (1.0 - t) * 120))   # ancho más grande
+        height = int(max(20, 20 + (1.0 - t) * 80))   # alto más moderado
 
-        x = center_x - size // 2
-        return pygame.Rect(x, y, size, size)
+        x = center_x - width // 2
+        return pygame.Rect(x, y, width, height)
+
 
     def draw_neon_text(self, surf, text, pos, size=24, glow_color=(120,60,220)):
         f = pygame.font.SysFont("Consolas", size, bold=True)
@@ -459,15 +465,33 @@ class RetroNeonSim:
 
         # ---------- Fondo dinámico (más claro a mayor velocidad) ----------
         # speed_factor in [0..1]
-        speed_factor = min(1.0, (getattr(self, "display_speed", 0.0) / 120.0))
-        top_color = int(12 + speed_factor * 40)
-        bot_color = int(24 + speed_factor * 30)
+      # ---------- Fondo dinámico (gris azulado más notorio con la velocidad) ----------
+# ---------- Fondo dinámico (gris azulado que se oscurece notablemente con la velocidad) ----------
+        speed_factor = min(1.0, getattr(self, "display_speed", 0.0) / 120.0)
+
+        # Colores base (más claros a baja velocidad)
+        # A altas velocidades se vuelven mucho más oscuros
+        top_color = int( 100 - speed_factor * 150)  # antes 160 - 100
+        bot_color = int(255 - speed_factor * 140)  # antes 190 - 90
+
         for i in range(SCREEN_H):
-            t = i / SCREEN_H
-            r = int((top_color * (1 - t) + (bot_color + 10) * t) // 1)
-            g = int((top_color * 0.6 * (1 - t) + (bot_color) * t) // 1)
-            b = int((top_color * 1.3 * (1 - t) + (bot_color + 40) * t) // 1)
+            t = i / SCREEN_H  # proporción vertical
+            
+            # Combinación con un tono más azulado y más contraste
+            r = int((top_color * (1 - t) + (bot_color - 30) * t))
+            g = int((top_color * 0.9 * (1 - t) + (bot_color - 40) * t))
+            b = int((top_color * 1.4 * (1 - t) + (bot_color + 50) * t))
+
+            # Limitar valores válidos
+            r = max(0, min(255, r))
+            g = max(0, min(255, g))
+            b = max(0, min(255, b))
+
             pygame.draw.line(s, (r, g, b), (0, i), (SCREEN_W, i))
+
+
+
+
 
         # ---------- Carretera en perspectiva ----------
         road_bottom_y = SCREEN_H
@@ -572,8 +596,8 @@ class RetroNeonSim:
             # roof
             pygame.draw.rect(s, (70,90,120), (cx + 18, cy + 16, cw - 36, ch // 3), border_radius=8)
             # rear lights (base)
-            pygame.draw.rect(s, (150, 30, 30), (cx + 10, cy + ch - 24, 14, 6))
-            pygame.draw.rect(s, (150, 30, 30), (cx + cw - 24, cy + ch - 24, 14, 6))
+            pygame.draw.rect(s, (150, 30, 30), (cx + 40, cy + ch - 40, 10, 1))
+            pygame.draw.rect(s, (150, 30, 30), (cx + cw - 60, cy + ch - 40, 10, 1))
             # LED strip middle
             pygame.draw.rect(s, (110,140,190), (cx + cw//2 - 8, cy + ch - 28, 16, 4), border_radius=2)
             # side shadow
@@ -584,11 +608,11 @@ class RetroNeonSim:
         if getattr(self, "brake_on", False):
             # stronger glow when braking
             glow_surf = pygame.Surface((cw+20, 24), pygame.SRCALPHA)
-            pygame.draw.rect(glow_surf, (255,40,40,140), (6, 0, 14, 6), border_radius=3)
-            pygame.draw.rect(glow_surf, (255,40,40,140), (cw - 26, 0, 14, 6), border_radius=3)
+            #pygame.draw.rect(glow_surf, (255,40,40,140), (6, 0, 14, 6), border_radius=3)
+            #pygame.draw.rect(glow_surf, (255,40,40,140), (cw - 26, 0, 14, 6), border_radius=3)
             s.blit(glow_surf, (cx - 6, cy + ch - 30))
-            pygame.draw.rect(s, (255,12,12), (cx + 10, cy + ch - 24, 14, 6))
-            pygame.draw.rect(s, (255,12,12), (cx + cw - 24, cy + ch - 24, 14, 6))
+            pygame.draw.rect(s, (255,12,12), (cx + 40, cy + ch - 74, 16, 6))
+            pygame.draw.rect(s, (255,12,12), (cx + cw - 60, cy + ch - 74, 16, 6))
 
         # ---------- Partículas ----------
         for x,y,life,vx,vy in self.particles:
