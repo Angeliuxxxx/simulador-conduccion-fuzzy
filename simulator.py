@@ -1,23 +1,17 @@
 """
-Simulador AUTOMAX (Mamdani fuzzy)
+Simulador AUTOMAX (Mamdani fuzzy) con ciclo día/noche + lluvia + claxon + obstáculo dinámico + rebase animado
 Guarda como retro_neon_fuzzy_sim.py
 Requisitos: pygame, numpy, scikit-fuzzy, pandas (opcional)
 """
 
 import os
-import sys
-import math
 import random
-import time
 from datetime import datetime
-import csv
 
 import numpy as np
 import pandas as pd
-
 import pygame
 from pygame import gfxdraw
-
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 
@@ -25,12 +19,10 @@ from skfuzzy import control as ctrl
 SCREEN_W = 1200
 SCREEN_H = 600
 FPS = 60
-
-ASSETS_DIR = "assets"  # carpeta opcional para sprites
+ASSETS_DIR = "assets"
 
 # -------------------- Fuzzy controller (Mamdani) --------------------
 class FuzzyController:
-    
     def __init__(self):
         # Universos
         self.vel_univ = np.arange(0, 121, 1)     # km/h
@@ -61,7 +53,7 @@ class FuzzyController:
         self.act['mantener'] = fuzz.trimf(self.act_univ, [30, 50, 70])
         self.act['acelerar'] = fuzz.trimf(self.act_univ, [60, 100, 100])
 
-        # --- MEJORA DE REGLAS DE IA ---
+        # Reglas
         rules = [
             ctrl.Rule(self.vis['baja'], self.act['frenar']),
             ctrl.Rule(self.dist['corta'] & (self.vel['media'] | self.vel['alta']), self.act['frenar']),
@@ -73,8 +65,6 @@ class FuzzyController:
             ctrl.Rule(self.dist['larga'] & self.vis['alta'] & self.vel['alta'], self.act['mantener']),
             ctrl.Rule(self.dist['larga'] & self.vis['media'], self.act['mantener']),
         ]
-        # --- FIN DE MEJORA DE REGLAS ---
-
         system = ctrl.ControlSystem(rules)
         self.sim = ctrl.ControlSystemSimulation(system)
 
@@ -110,7 +100,7 @@ class Slider:
         pygame.draw.rect(surf, (50,50,50), (x, line_y-3, w, 6), border_radius=3)
         rel = (self.value - self.minv) / (self.maxv - self.minv)
         hx = x + int(rel * w)
-        for i,alpha in enumerate([40,80,140]):
+        for i,_ in enumerate([40,80,140]):
             col = (100, 60+i*40, 200)
             s = pygame.Surface((self.handle_radius*3, self.handle_radius*3), pygame.SRCALPHA)
             pygame.draw.circle(s, col + (40 - i*10,), (self.handle_radius*1, self.handle_radius*1), self.handle_radius + (2-i))
@@ -120,18 +110,16 @@ class Slider:
         surf.blit(lbl, (x, y - 22))
 
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:
-                mx,my = event.pos
-                x,y,w,h = self.rect
-                line_y = y + h//2
-                rel = (self.value - self.minv) / (self.maxv - self.minv)
-                hx = x + int(rel * w)
-                if (mx-hx)**2 + (my-line_y)**2 <= (self.handle_radius+5)**2:
-                    self.dragging = True
-        elif event.type == pygame.MOUSEBUTTONUP:
-            if event.button == 1:
-                self.dragging = False
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx,my = event.pos
+            x,y,w,h = self.rect
+            line_y = y + h//2
+            rel = (self.value - self.minv) / (self.maxv - self.minv)
+            hx = x + int(rel * w)
+            if (mx-hx)**2 + (my-line_y)**2 <= (self.handle_radius+5)**2:
+                self.dragging = True
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.dragging = False
         elif event.type == pygame.MOUSEMOTION and self.dragging:
             mx,my = event.pos
             x,y,w,h = self.rect
@@ -143,7 +131,7 @@ class Slider:
 class RetroNeonSim:
     def __init__(self):
         pygame.init()
-        pygame.mixer.init() # Inicializar el mezclador de sonido
+        pygame.mixer.init()
         pygame.display.set_caption("Automax")
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
         self.clock = pygame.time.Clock()
@@ -154,32 +142,31 @@ class RetroNeonSim:
         self.car_sprite = None
         self.obst_sprite = None
         self.bg_sprite = None
-        
 
         # fuzzy controller
         self.fuzzy = FuzzyController()
 
         # simulation state
-        self.speed = 40.0        # km/h (actual)
-        self.target_speed = 40.0 # slider initial
-        self.px_per_m = 5.0      # visual scale: pixels per meter
-        
-        # *** ESTE ES TU COCHE ORIGINAL (el blanco 3D) ***
+        self.speed = 40.0        # km/h (slider)
+        self.target_speed = 40.0
+        self.px_per_m = 5.0
+
+        # coche visual
         self.car_vis_w = 180
         self.car_vis_h = 140
         self.car_x = SCREEN_W // 2 - self.car_vis_w // 2
         self.car_y = SCREEN_H - self.car_vis_h - 18
-        self.car_w = self.car_vis_w # Usamos el ancho visual
-        self.car_h = self.car_vis_h # Usamos el alto visual
-        
-        # Llamar a try_load_assets DESPUÉS de definir las dimensiones
+        self.car_w = self.car_vis_w
+        self.car_h = self.car_vis_h
+
+        # assets
         self.try_load_assets()
 
-        # Cargar sonidos con mensajes de error
+        # sonidos
         self.rain_sound = None
         self.horn_sound = None
         try:
-            rain_path = os.path.join(ASSETS_DIR, "rain_loop.wav.mp3") # Usa el nombre de tu archivo
+            rain_path = os.path.join(ASSETS_DIR, "rain_loop.wav.mp3")
             if not os.path.exists(rain_path):
                 print(f"ERROR: No se encontró '{rain_path}' en 'assets'. El sonido de lluvia no funcionará.")
             else:
@@ -188,7 +175,7 @@ class RetroNeonSim:
         except Exception as e:
             print(f"Error al cargar rain_loop.wav.mp3: {e}")
         try:
-            horn_path = os.path.join(ASSETS_DIR, "horn.wav.mp3") # Usa el nombre de tu archivo
+            horn_path = os.path.join(ASSETS_DIR, "horn.wav.mp3")
             if not os.path.exists(horn_path):
                 print(f"ERROR: No se encontró '{horn_path}' en 'assets'. El claxon no funcionará.")
             else:
@@ -197,45 +184,45 @@ class RetroNeonSim:
         except Exception as e:
             print(f"Error al cargar horn.wav.mp3: {e}")
 
-        self.obst_distance_m = 40.0  # meters (slider)
-        self.visibility = 100.0       # %
-        self.obst_base_x = self.car_x + 400  # base position for obstacle drawing
+        # entorno y estado
+        self.obst_distance_m = 40.0
+        self.visibility = 100.0
+        self.visibility_before_rain = 100.0
+        self.daytime = 12.0           # hora simulada (0..24)
+        self.headlights_on = False
+        self.obst_base_x = self.car_x + 400
         self.time = 0.0
 
-        # velocities and physics
+        # física
         self.dt = 1.0 / FPS
         self.accel = 0.0
 
-        # UI sliders
+        # sliders
         sx = 40; sw = 380; sy = 60
         self.slider_speed = Slider((sx, sy, sw, 30), 0, 120, self.speed, "Velocidad (km/h)")
         self.slider_dist = Slider((sx, sy+80, sw, 30), 0, 100, self.obst_distance_m, "Distancia (m)")
         self.slider_vis = Slider((sx, sy+160, sw, 30), 0, 100, self.visibility, "Visibilidad (%)")
 
-        # toggle mode
+        # modos y listas
         self.demo_mode = False
         self.demo_timer = 0.0
-
-        # particles list
         self.particles = []
-
-        # brake light
         self.brake_on = False
-
-        # log
         self.log = []
-
-        # for neon road animation: lines positions
         self.road_offset = 0.0
-
-        # run
         self.running = True
 
-        # Estados de lluvia y claxon
+        # lluvia y claxon
         self.rain_enabled = False
-        self.rain_particles = [] # Lista para las partículas de lluvia
+        self.rain_particles = []
         self.horn_playing = False
-        self.visibility_before_rain = 100.0 # <<< NUEVO: Guardar la visibilidad
+
+        # obstáculo dinámico y rebase
+        self.obst_speed = 60.0  # km/h fijo
+        self.obst_lane = 0      # 0 centro, 1 izquierda, 2 derecha
+        self.rebase_anim = 0.0  # progreso 0..1
+        self.rebase_dir = 0     # -1 izq, +1 der
+        self.rebase_particles = []
 
     def try_load_assets(self):
         try:
@@ -262,6 +249,19 @@ class RetroNeonSim:
             print("BG sprite load error:", e)
             self.bg_sprite = None
 
+    # -------- Día/Noche: calcula visibilidad por hora --------
+    def day_night_visibility(self):
+        h = self.daytime % 24.0
+        if 7 <= h <= 19:
+            return 100.0  # día
+        elif 19 < h <= 22:
+            return max(30.0, 100.0 - (h - 19) * 20)  # atardecer 100→40 aprox
+        elif 22 < h or h < 6:
+            return 30.0   # noche profunda
+        elif 6 <= h < 7:
+            return 30.0 + (h - 6) * 70  # amanecer 30→100
+        return 100.0
+
     def run(self):
         while self.running:
             dt = self.clock.tick(FPS) / 1000.0
@@ -274,21 +274,20 @@ class RetroNeonSim:
 
     def handle_events(self):
         for e in pygame.event.get():
-            # --- Cerrar ventana ---
+            # Cerrar ventana
             if e.type == pygame.QUIT:
-                    self.running = False
+                self.running = False
 
-            # --- Sliders ---
+            # Sliders
             self.slider_speed.handle_event(e)
             self.slider_dist.handle_event(e)
             self.slider_vis.handle_event(e)
 
-            # --- Teclado ---
+            # Teclado
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
                     self.running = False
                 elif e.key == pygame.K_SPACE:
-                    # Cambia el modo demo (automático)
                     self.demo_mode = not self.demo_mode
                     print("Demo mode:", self.demo_mode)
                 elif e.key == pygame.K_s:
@@ -296,47 +295,35 @@ class RetroNeonSim:
                     print("Log guardado.")
                 elif e.key == pygame.K_r:
                     self.reset_sim()
-                
-                # <<< NUEVO: Lógica mejorada para la lluvia (Tecla L) >>>
                 elif e.key == pygame.K_l:
                     self.rain_enabled = not self.rain_enabled
                     if self.rain_enabled:
-                        # Guardar la visibilidad actual ANTES de que llueva
                         self.visibility_before_rain = self.slider_vis.value
                         if self.rain_sound:
-                            self.rain_sound.play(loops=-1) # -1 = loop infinito
+                            self.rain_sound.play(loops=-1)
                     else:
-                        # Restaurar la visibilidad que guardamos
                         self.slider_vis.value = self.visibility_before_rain
                         if self.rain_sound:
                             self.rain_sound.stop()
                     print(f"Lluvia activada: {self.rain_enabled}")
 
-            # --- Mouse: arrastrar obstáculo manualmente ---
-            if e.type == pygame.MOUSEBUTTONDOWN:
-                if e.button == 1:  # botón izquierdo
-                    mx, my = e.pos
-                    if self.obstacle_screen_rect().collidepoint(mx, my):
-                        self.dragging_obstacle = True
-
-            elif e.type == pygame.MOUSEBUTTONUP:
-                if e.button == 1:
-                    self.dragging_obstacle = False
-
-            elif e.type == pygame.MOUSEMOTION and getattr(self, "dragging_obstacle", False):
-                # Solo mover obstáculo con el mouse
+            # Mouse: arrastrar obstáculo
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
                 mx, my = e.pos
-                SCREEN_W, SCREEN_H = self.screen.get_size()
+                if self.obstacle_screen_rect().collidepoint(mx, my):
+                    self.dragging_obstacle = True
+            elif e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+                self.dragging_obstacle = False
+            elif e.type == pygame.MOUSEMOTION and getattr(self, "dragging_obstacle", False):
+                mx, my = e.pos
+                SCREEN_Wi, SCREEN_Hi = self.screen.get_size()
                 road_horizon_y = 120
                 car_front_y = self.car_y
                 my_clamped = max(road_horizon_y + 10, min(car_front_y - 20, my))
-
-                # Mapea la posición del mouse en pantalla a distancia (0..100 m)
                 t = (my_clamped - road_horizon_y) / max(1.0, (car_front_y - road_horizon_y - 40))
                 new_dist_m = max(0.0, min(100.0, (1.0 - t) * 100.0))
                 self.obst_distance_m = new_dist_m
                 self.slider_dist.value = self.obst_distance_m
-
 
     def reset_sim(self):
         self.speed = 40.0
@@ -349,78 +336,83 @@ class RetroNeonSim:
         self.brake_on = False
         self.log = []
         self.time = 0.0
+        self.daytime = 12.0
+        self.headlights_on = False
+        self.rain_enabled = False
+        self.horn_playing = False
+        self.obst_lane = 0
+        self.rebase_anim = 0.0
+        self.rebase_particles = []
+        if self.rain_sound:
+            self.rain_sound.stop()
 
     def update(self, dt):
-        # if user moves sliders, read them (manual input)
+        # Lectura sliders
         self.speed = self.slider_speed.value
-        self.obst_distance_m = self.slider_dist.value
-        
-        # <<< NUEVO: Lógica de lluvia (afecta la visibilidad) >>>
-        if self.rain_enabled:
-            # Forzamos la visibilidad a ser BAJA
-            self.visibility = min(self.slider_vis.value, 40.0)
-            self.slider_vis.value = self.visibility # Forzamos el slider a bajar
-        else:
-            # Si la lluvia se acaba de apagar, el slider_vis.value ya fue restaurado
-            # en handle_events. Simplemente leemos su valor.
-            self.visibility = self.slider_vis.value
+        # OJO: obst_distance_m se actualizará por dinámica; slider es espejo
 
-        # <<< NUEVO: Lógica de velocidad forzada por lluvia >>>
+        # Avanza ciclo día/noche
+        self.daytime = (self.daytime + dt * 0.25) % 24.0
+        day_vis = self.day_night_visibility()
+
+        # Visibilidad efectiva: mínimo entre slider y día/noche
+        effective_vis = min(self.slider_vis.value, day_vis)
+
+        # Lluvia: fuerza límite adicional
         if self.rain_enabled:
-            max_speed_in_rain = 50.0 # Límite de velocidad en lluvia
+            effective_vis = min(effective_vis, 40.0)
+            # Limitar velocidad en lluvia
+            max_speed_in_rain = 50.0
             if self.speed > max_speed_in_rain:
-                # Forzar el slider de velocidad a bajar gradualmente
-                self.slider_speed.value = max(max_speed_in_rain, self.speed - dt * 25.0) # Baja 25km/h por seg
+                self.slider_speed.value = max(max_speed_in_rain, self.speed - dt * 25.0)
                 self.speed = self.slider_speed.value
-        # <<< FIN Lógica de velocidad forzada >>>
 
-        # demo mode: override sliders gradually
+        # Aplicar visibilidad y luces
+        self.visibility = effective_vis
+        self.headlights_on = self.visibility < 60.0
+
+        # Modo demo
         if self.demo_mode:
             self.demo_timer += dt
             if self.demo_timer > 2.0:
                 self.demo_timer = 0.0
                 self.slider_speed.value = random.uniform(20, 100)
-                self.slider_dist.value = random.uniform(5, 90)
+                # Distancia será recalculada por dinámica; el slider se actualizará
                 if self.rain_enabled:
-                    self.slider_vis.value = random.uniform(20, 40)
+                    self.slider_vis.value = random.uniform(20, 60)
                 else:
                     self.slider_vis.value = random.uniform(50, 100)
-                
                 self.speed = self.slider_speed.value
-                self.obst_distance_m = self.slider_dist.value
-                self.visibility = self.slider_vis.value
 
-        # --- Fuzzy decision (compute action) ---
-        action_val = self.fuzzy.compute(self.speed, self.obst_distance_m, self.visibility)  # 0-100
+        # --- Fuzzy decision ---
+        action_val = self.fuzzy.compute(self.speed, self.obst_distance_m, self.visibility)
 
-        # Map fuzzy action to acceleration (crisp)
+        # Map a aceleración
         if action_val < 35:
-            accel = -60.0     # strong brake (km/h per s approx)
+            accel = -60.0
             self.brake_on = True
             self.add_particles(intensity=1.2, direction=-1)
             action_text = "FRENAR"
         elif action_val > 65:
-            accel = 18.0      # accelerate
+            accel = 18.0
             self.brake_on = False
             self.add_particles(intensity=1.6, direction=1)
             action_text = "ACELERAR"
         else:
-            accel = -6.0      # slight decel / maintain
+            accel = -6.0
             self.brake_on = False
             action_text = "MANTENER"
-        
-        # <<< NUEVO: Lógica del Claxon >>>
-        is_close = self.obst_distance_m < 30.0 # Definimos "cerca" como < 30m
-        
+
+        # Claxon automático
+        is_close = self.obst_distance_m < 30.0
         if is_close and not self.horn_playing and self.horn_sound:
-            self.horn_sound.play(loops=-1) # Empezar a sonar en bucle
+            self.horn_sound.play(loops=-1)
             self.horn_playing = True
         elif not is_close and self.horn_playing and self.horn_sound:
-            self.horn_sound.stop() # Dejar de sonar
+            self.horn_sound.stop()
             self.horn_playing = False
-        # <<< FIN Lógica del Claxon >>>
 
-        # integrate speed change (approx)
+        # Integración velocidad visual
         if not hasattr(self, 'display_speed'):
             self.display_speed = self.speed
         self.display_speed += accel * dt
@@ -428,16 +420,50 @@ class RetroNeonSim:
         self.display_speed += (self.speed - self.display_speed) * min(1.0, relax * dt)
         self.display_speed = max(0.0, min(120.0, self.display_speed))
 
-        # move road offset by speed (simulate forward motion)
+        # Movimiento de líneas
         vel_m_s = (self.display_speed * 1000.0) / 3600.0
         px_move = vel_m_s * self.px_per_m * dt
         self.road_offset = (self.road_offset + px_move) % 60
-        
-        # update particles physics
-        self.update_particles(dt)
-        self.update_rain_particles(dt) # <<< NUEVO: Actualizar partículas de lluvia
 
-        # update logging
+        # --- Dinámica del obstáculo (60 km/h fijo) ---
+        car_vel_ms = (self.display_speed * 1000.0) / 3600.0
+        obst_vel_ms = (self.obst_speed * 1000.0) / 3600.0
+        rel_vel = car_vel_ms - obst_vel_ms   # >0: te acercas; <0: se aleja
+        self.obst_distance_m -= rel_vel * dt
+        self.obst_distance_m = max(0.0, min(100.0, self.obst_distance_m))
+        self.slider_dist.value = self.obst_distance_m
+
+        # --- Rebase/esquive automático y animación ---
+        if self.obst_distance_m <= 5.0 and self.rebase_anim <= 0.0:
+            # Simula que lo rebasaste: reaparece adelante en carril aleatorio
+            self.obst_distance_m = random.uniform(80.0, 100.0)
+            self.slider_dist.value = self.obst_distance_m
+            self.obst_lane = random.choice([0,1,2])
+
+            # Activar animación de rebase
+            self.rebase_anim = 1.0
+            self.rebase_dir = random.choice([-1, 1])
+            # Generar partículas de velocidad
+            self.rebase_particles = []
+            cx_center = self.car_x + self.car_w // 2
+            cy_center = self.car_y + self.car_h // 2
+            for _ in range(30):
+                self.rebase_particles.append([
+                    cx_center,
+                    cy_center,
+                    random.uniform(0.5, 1.2),   # vida
+                    random.uniform(-200, 200),  # vx
+                    random.uniform(-300, -100)  # vy
+                ])
+
+        # Partículas normales
+        self.update_particles(dt)
+        # Actualizar partículas de rebase
+        self.update_rebase_particles(dt)
+        # Lluvia
+        self.update_rain_particles(dt)
+
+        # Log
         self.log.append({
             "time": round(self.time,3),
             "slider_speed": round(self.speed,3),
@@ -445,27 +471,20 @@ class RetroNeonSim:
             "distance_m": round(self.obst_distance_m,3),
             "visibility": round(self.visibility,3),
             "action_val": round(action_val,3),
-            "action_text": action_text
+            "action_text": action_text,
+            "hour": round(self.daytime,2)
         })
 
     def add_particles(self, intensity=1.0, direction=1):
-        # Genera partículas en las posiciones de las llantas traseras
-        
-        # Posiciones X aproximadas de las llantas (basadas en las luces de freno)
         llanta_izq_x = self.car_x + 30 + random.uniform(-2, 2)
         llanta_der_x = self.car_x + self.car_w - 50 + random.uniform(-2, 2)
-        
-        # Posición Y (justo en la parte inferior del coche)
         y = self.car_y + self.car_h - 25 + random.uniform(0, 8)
-
-        # Genera la mitad de partículas en cada llanta
-        for i in range(int(1 + intensity)): # Mitad en la izquierda
+        for _ in range(int(1 + intensity)):
             life = random.uniform(0.4, 1.0)
             vx = random.uniform(10,60) * (0.02 * (-direction))
             vy = random.uniform(-10,5) * 0.02
             self.particles.append([llanta_izq_x, y, life, vx, vy])
-            
-        for i in range(int(1 + intensity)): # Mitad en la derecha
+        for _ in range(int(1 + intensity)):
             life = random.uniform(0.4, 1.0)
             vx = random.uniform(10,60) * (0.02 * (-direction))
             vy = random.uniform(-10,5) * 0.02
@@ -482,41 +501,45 @@ class RetroNeonSim:
                 newp.append([x,y,life,vx,vy])
         self.particles = newp
 
-    # <<< NUEVO: Funciones para la lluvia >>>
+    def update_rebase_particles(self, dt):
+        newp = []
+        for p in self.rebase_particles:
+            x,y,life,vx,vy = p
+            life -= dt
+            x += vx * dt
+            y += vy * dt
+            if life > 0:
+                newp.append([x,y,life,vx,vy])
+        self.rebase_particles = newp
+
+    # -------- Lluvia --------
     def update_rain_particles(self, dt):
         if not self.rain_enabled:
-            self.rain_particles = [] # Borrar lluvia si está desactivada
+            self.rain_particles = []
             return
-        
-        # Crear nuevas partículas de lluvia
-        if random.random() < 0.8: # Probabilidad de crear lluvia
-            for _ in range(15): # Cuántas gotas crear por frame
+        if random.random() < 0.8:
+            for _ in range(15):
                 x = random.randint(0, SCREEN_W)
                 y = random.randint(-50, -10)
-                l = random.randint(15, 25) # Largo de la gota
-                speed = random.randint(15, 20) # Velocidad de la gota
+                l = random.randint(15, 25)
+                speed = random.randint(15, 20)
                 self.rain_particles.append([x, y, l, speed])
-
-        # Mover y borrar partículas viejas
         new_rain = []
         for p in self.rain_particles:
-            p[1] += p[3] # Mover 'y' por 'speed'
-            if p[1] < SCREEN_H: # Si aún está en pantalla
+            p[1] += p[3]
+            if p[1] < SCREEN_H:
                 new_rain.append(p)
         self.rain_particles = new_rain
 
     def draw_rain_particles(self, surf):
         if not self.rain_enabled:
             return
-        
-        for x, y, length, speed in self.rain_particles:
-            # Dibujar la gota de lluvia (línea delgada)
+        for x, y, length, _ in self.rain_particles:
             pygame.draw.line(surf, (150, 180, 255), (x, y), (x, y + length), 1)
-    # <<< FIN de funciones de lluvia >>>
 
     def obstacle_screen_rect(self):
-        SCREEN_W, SCREEN_H = self.screen.get_size()
-        center_x = SCREEN_W // 2
+        SCREEN_Wi, SCREEN_Hi = self.screen.get_size()
+        center_x = SCREEN_Wi // 2
         road_horizon_y = 120
         car_front_y = self.car_y
         d = max(0.0, min(100.0, self.obst_distance_m))
@@ -525,15 +548,20 @@ class RetroNeonSim:
         y = int(road_horizon_y + (1.0 - t) * max_travel)
         width = int(max(24, 24 + (1.0 - t) * 120))
         height = int(max(20, 20 + (1.0 - t) * 80))
-        x = center_x - width // 2
+        # Ajuste de carril
+        lane_offset = 0
+        if self.obst_lane == 1:
+            lane_offset = -80
+        elif self.obst_lane == 2:
+            lane_offset = 80
+        x = center_x - width // 2 + lane_offset
         return pygame.Rect(x, y, width, height)
-
 
     def draw_neon_text(self, surf, text, pos, size=24, glow_color=(120,60,220)):
         f = pygame.font.SysFont("Consolas", size, bold=True)
         base = f.render(text, True, (255,255,255))
         x,y = pos
-        for i,alpha in enumerate([60,30,15]):
+        for i,_ in enumerate([60,30,15]):
             s = f.render(text, True, (glow_color[0], glow_color[1], glow_color[2]))
             s.set_alpha(80 - i*20)
             surf.blit(s, (x- i -2, y - i -2))
@@ -541,33 +569,39 @@ class RetroNeonSim:
 
     def draw(self):
         s = self.screen
-        SCREEN_W, SCREEN_H = s.get_size()
-        center_x = SCREEN_W // 2
-        
-        # --- Fondo (Este es el código de fondo de TU versión) ---
-        speed_factor = min(1.0, getattr(self, "display_speed", 0.0) / 120.0)
-        top_color = int( 100 - speed_factor * 150)
-        bot_color = int(255 - speed_factor * 140)
-        for i in range(SCREEN_H):
-            t = i / SCREEN_H
+        SCREEN_Wi, SCREEN_Hi = s.get_size()
+        center_x = SCREEN_Wi // 2
+
+        # --- Fondo dinámico SOLO por hora (día/noche) ---
+        h = self.daytime % 24.0
+        if 7 <= h <= 19:
+            day_factor = 1.0            # día
+        elif 19 < h <= 22:
+            day_factor = max(0.0, 1.0 - (h - 19) / 3.0)  # atardecer
+        elif 22 < h or h < 6:
+            day_factor = 0.0            # noche
+        else:  # 6 <= h < 7
+            day_factor = (h - 6)        # amanecer
+        top_color = int(40 + 120 * day_factor)   # 40 noche → 160 día
+        bot_color = int(60 + 160 * day_factor)   # 60 noche → 220 día
+        for i in range(SCREEN_Hi):
+            t = i / SCREEN_Hi
             r = int((top_color * (1 - t) + (bot_color - 30) * t))
             g = int((top_color * 0.9 * (1 - t) + (bot_color - 40) * t))
             b = int((top_color * 1.4 * (1 - t) + (bot_color + 50) * t))
             r = max(0, min(255, r))
             g = max(0, min(255, g))
             b = max(0, min(255, b))
-            pygame.draw.line(s, (r, g, b), (0, i), (SCREEN_W, i))
+            pygame.draw.line(s, (r, g, b), (0, i), (SCREEN_Wi, i))
 
-        # <<< NUEVO: Oscurecer la pantalla si llueve >>>
+        # Oscurecer si llueve (overlay)
         if self.rain_enabled:
-            dark_overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-            # Tono azul oscuro, 90/255 de opacidad
-            dark_overlay.fill((0, 0, 10, 90)) 
+            dark_overlay = pygame.Surface((SCREEN_Wi, SCREEN_Hi), pygame.SRCALPHA)
+            dark_overlay.fill((0, 0, 10, 90))
             s.blit(dark_overlay, (0, 0))
-        # <<< FIN de oscurecer >>>
 
-        # --- Carretera (Esta es la carretera de TU versión) ---
-        road_bottom_y = SCREEN_H
+        # --- Carretera ---
+        road_bottom_y = SCREEN_Hi
         road_horizon_y = 110
         lane_color = (70, 170, 255)
         asphalt_color = (20, 20, 24)
@@ -582,8 +616,8 @@ class RetroNeonSim:
         ])
         pygame.draw.line(s, lane_color, (center_x - road_left_w, road_bottom_y), (center_x - road_horizon_inner, road_horizon_y), 3)
         pygame.draw.line(s, lane_color, (center_x + road_left_w, road_bottom_y), (center_x + road_horizon_inner, road_horizon_y), 3)
-        
-        # --- Líneas centrales (Esta es la lógica de TU versión) ---
+
+        # --- Líneas centrales animadas ---
         dash_h = 40
         gap = 90
         vel_m_s = (getattr(self, "display_speed", 0.0) * 1000.0) / 3600.0
@@ -591,12 +625,12 @@ class RetroNeonSim:
         self.road_offset = (self.road_offset + move_px) % (dash_h + gap)
         offset_pix = int(self.road_offset)
         lane_x = center_x - 2
-        total_height = SCREEN_H - road_horizon_y
+        total_height = SCREEN_Hi - road_horizon_y
         for y in range(int(road_horizon_y - (dash_h + gap)),
-                       int(SCREEN_H + (dash_h + gap)),
+                       int(SCREEN_Hi + (dash_h + gap)),
                        dash_h + gap):
             yy = y + offset_pix
-            if yy < road_horizon_y - dash_h or yy > SCREEN_H + dash_h:
+            if yy < road_horizon_y - dash_h or yy > SCREEN_Hi + dash_h:
                 continue
             t = (yy - road_horizon_y) / total_height
             scale = 1.0 - min(1.0, t * 0.9)
@@ -604,8 +638,8 @@ class RetroNeonSim:
             dash_h_scaled = int(dash_h * (0.5 + scale * 0.7))
             if yy < road_horizon_y + 100:
                 alpha = int(255 * ((yy - road_horizon_y) / 100.0))
-            elif yy > SCREEN_H - 120:
-                alpha = int(255 * ((SCREEN_H - yy) / 120.0))
+            elif yy > SCREEN_Hi - 120:
+                alpha = int(255 * ((SCREEN_Hi - yy) / 120.0))
             else:
                 alpha = 255
             alpha = max(0, min(255, alpha))
@@ -615,7 +649,7 @@ class RetroNeonSim:
             pygame.draw.rect(surf, (*line_color, alpha), (0, 0, dash_w, dash_h_scaled))
             s.blit(surf, (lane_x - dash_w // 2, yy - dash_h_scaled // 2))
 
-        # --- Obstáculo (Este es el obstáculo de TU versión) ---
+        # --- Obstáculo ---
         rect = self.obstacle_screen_rect()
         if self.obst_sprite:
             sprite = pygame.transform.smoothscale(self.obst_sprite, (rect.w, rect.h))
@@ -627,12 +661,23 @@ class RetroNeonSim:
             pygame.gfxdraw.box(s, rect, (215,75,75))
             pygame.gfxdraw.rectangle(s, rect, (255,120,120))
 
-        # <<< NUEVO: Dibujar partículas de lluvia >>>
-        # Se dibujan aquí para que estén detrás del coche
+        # --- Lluvia detrás del coche ---
         self.draw_rain_particles(s)
 
-        # --- Coche (Este es el código de TU coche blanco) ---
+        # --- Coche (con animación de rebase) ---
         cx, cy, cw, ch = self.car_x, self.car_y, self.car_w, self.car_h
+        if self.rebase_anim > 0.0:
+            offset_x = int(self.rebase_dir * 80 * self.rebase_anim)
+            offset_y = int(-40 * self.rebase_anim)
+            cx += offset_x
+            cy += offset_y
+            self.rebase_anim = max(0.0, self.rebase_anim - 0.05)
+
+            # Overlay translúcido (sensación de desenfoque)
+            blur = pygame.Surface((SCREEN_Wi, SCREEN_Hi), pygame.SRCALPHA)
+            blur.fill((255, 255, 200, 40))
+            s.blit(blur, (0, 0))
+
         if self.car_sprite:
             car_img = pygame.transform.smoothscale(self.car_sprite, (cw, ch))
             s.blit(car_img, (cx, cy))
@@ -646,54 +691,74 @@ class RetroNeonSim:
             pygame.draw.rect(s, (20, 20, 28), (cx, cy + 8, 8, ch - 16))
             pygame.draw.rect(s, (20, 20, 28), (cx + cw - 8, cy + 8, 8, ch - 16))
 
-        # Luces de freno (Esta es la lógica de TU versión)
+        # Luces delanteras automáticas
+        if self.headlights_on:
+            lx = cx + cw//2
+            ly = cy + 20
+            beam = pygame.Surface((SCREEN_Wi, SCREEN_Hi), pygame.SRCALPHA)
+            pygame.draw.polygon(beam, (255, 255, 200, 90),
+                [(lx-40, ly), (lx+40, ly), (lx+260, ly-120), (lx-260, ly-120)])
+            s.blit(beam, (0,0))
+
+        # Luces de freno
         if getattr(self, "brake_on", False):
-            glow_surf = pygame.Surface((cw+20, 24), pygame.SRCALPHA)
-            s.blit(glow_surf, (cx - 6, cy + ch - 30))
             pygame.draw.rect(s, (255,12,12), (cx + 40, cy + ch - 74, 16, 6))
             pygame.draw.rect(s, (255,12,12), (cx + cw - 60, cy + ch - 74, 16, 6))
 
-        # --- Partículas (Humo/Freno) ---
-        for x,y,life,vx,vy in self.particles:
+        # Partículas rebase (destellos)
+        for x,y,life,_,_ in self.rebase_particles:
+            alpha = int(255 * (life / 1.2))
+            surf = pygame.Surface((4,4), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (255,200,80, alpha), (2,2), 2)
+            s.blit(surf, (int(x), int(y)))
+
+        # Partículas normales (humo/freno)
+        for x,y,life,_,_ in self.particles:
             alpha = int(255 * (life/1.0))
             surf = pygame.Surface((6,6), pygame.SRCALPHA)
             pygame.draw.circle(surf, (255,180,60, alpha), (3,3), 3)
             s.blit(surf, (x,y))
 
-        # --- HUD Izquierdo (Este es el HUD de TU versión) ---
-        hud = pygame.Surface((380, 320), pygame.SRCALPHA)
+        # HUD Izquierdo
+        hud = pygame.Surface((380, 340), pygame.SRCALPHA)
         hud.fill((10,10,10,160))
         s.blit(hud, (20, 30))
         self.slider_speed.draw(s, self.font)
         self.slider_dist.draw(s, self.font)
         self.slider_vis.draw(s, self.font)
+        hour_txt = self.font.render(f"Hora: {int(self.daytime):02d}:{int((self.daytime%1)*60):02d}", True, (210,210,210))
+        s.blit(hour_txt, (30, 30 + 300))
 
-        # --- HUD Central (Este es el HUD de TU versión) ---
+        # HUD Central (velocidad)
         speed_text = self.bigfont.render(f"{getattr(self, 'display_speed', 0.0):.0f}", True, (255,255,255))
         unit_text = self.font.render("km/h", True, (190,190,190))
         s.blit(speed_text, (center_x - 20, 28))
         s.blit(unit_text, (center_x + 46, 56))
 
-        # --- Barras Laterales (Esta es la lógica de TU versión) ---
+        # Barras laterales (Visibilidad/Distancia)
         vis_bar_h = 120
         dist_bar_h = 120
         bar_w = 16
-        base_y = SCREEN_H - vis_bar_h - 80
-        base_x = SCREEN_W - 100
+        base_y = SCREEN_Hi - vis_bar_h - 80
+        base_x = SCREEN_Wi - 100
+
+        # Visibilidad
         vis_x = base_x
         vis_y = base_y
         pygame.draw.rect(s, (40, 40, 40), (vis_x, vis_y, bar_w, vis_bar_h), border_radius=4)
         vis_fill_h = int((self.visibility / 100.0) * vis_bar_h)
         grad_surf = pygame.Surface((bar_w, vis_fill_h))
         for yy in range(vis_fill_h):
-            t = yy / max(1, vis_fill_h - 1)
-            r = int(220 * (1 - t) + 60 * t)
-            g = int(60 * (1 - t) + 200 * t)
-            b = int(60 * (1 - t) + 80 * t)
+            tt = yy / max(1, vis_fill_h - 1)
+            r = int(220 * (1 - tt) + 60 * tt)
+            g = int(60 * (1 - tt) + 200 * tt)
+            b = int(60 * (1 - tt) + 80 * tt)
             pygame.draw.line(grad_surf, (r, g, b), (0, vis_fill_h - 1 - yy), (bar_w, vis_fill_h - 1 - yy))
         s.blit(grad_surf, (vis_x, vis_y + (vis_bar_h - vis_fill_h)))
         text_vis = self.font.render("Vis", True, (200, 200, 200))
         s.blit(text_vis, (vis_x - 4, vis_y + vis_bar_h + 6))
+
+        # Distancia
         dist_x = base_x + 40
         dist_y = base_y
         pygame.draw.rect(s, (40, 40, 40), (dist_x, dist_y, bar_w, dist_bar_h), border_radius=4)
@@ -701,27 +766,27 @@ class RetroNeonSim:
         dist_fill_h = int(dnorm * dist_bar_h)
         dist_surf = pygame.Surface((bar_w, dist_fill_h))
         for yy in range(dist_fill_h):
-            t = yy / max(1, dist_fill_h - 1)
-            r = int(80 * (1 - t) + 220 * t)
-            g = int(180 * (1 - t) + 60 * t)
-            b = int(60 * (1 - t) + 70 * t)
+            tt = yy / max(1, dist_fill_h - 1)
+            r = int(80 * (1 - tt) + 220 * tt)
+            g = int(180 * (1 - tt) + 60 * tt)
+            b = int(60 * (1 - tt) + 70 * tt)
             pygame.draw.line(dist_surf, (r, g, b), (0, dist_fill_h - 1 - yy), (bar_w, dist_fill_h - 1 - yy))
         s.blit(dist_surf, (dist_x, dist_y + (dist_bar_h - dist_fill_h)))
         text_dist = self.font.render("Dist", True, (200, 200, 200))
         s.blit(text_dist, (dist_x - 8, dist_y + dist_bar_h + 6))
 
-        # --- Estado Derecha (Esta es la lógica de TU versión) ---
+        # Estado derecha
         if self.log:
             last = self.log[-1]
             act = last["action_text"]
             action_val = last["action_val"]
             txt = f"Acción: {act} ({action_val:.1f})"
             actsurf = self.font.render(txt, True, (255, 200, 120))
-            s.blit(actsurf, (SCREEN_W - 340, 48))
+            s.blit(actsurf, (SCREEN_Wi - 340, 48))
 
-        # --- Instrucciones (CON LA TECLA 'L' AÑADIDA) ---
-        inst = self.font.render("L: Lluvia | SPACE: Demo | S: Guardar CSV | ESC: Salir", True, (180,180,180))
-        s.blit(inst, (SCREEN_W//2 - inst.get_width()//2, SCREEN_H - 28))
+        # Instrucciones
+        inst = self.font.render("L: Lluvia | SPACE: Demo | S: Guardar CSV | R: Reset | ESC: Salir", True, (180,180,180))
+        s.blit(inst, (SCREEN_Wi//2 - inst.get_width()//2, SCREEN_Hi - 28))
 
         pygame.display.flip()
 
